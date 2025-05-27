@@ -1,6 +1,7 @@
 import cv2
 import torch
 from ultralytics import YOLO
+import tkinter as tk
 
 def process_image(results, target_id):
     boxes = []
@@ -21,22 +22,22 @@ def process_image(results, target_id):
 
 def give_move(x, y, h, w, hp1, hp2, wp1, wp2):
     move = 0
-    if y < hp1 * h:
-        move = 1
-    elif y < hp1 * h and x > wp2 * w:
+    if y < hp1 * h and x > wp2 * w:
         move = 2
-    elif x > wp2 * w:
-        move = 3
     elif y > hp2 * h and x > wp2 * w:
         move = 4
-    elif y > hp2 * h:
-        move = 5
     elif y > hp2 * h and x < wp1 * w:
         move = 6
-    elif x < wp1 * w:
-        move = 7
     elif y < hp1 * h and x < wp1 * w:
         move = 8
+    elif x < wp1 * w:
+        move = 7
+    elif y < hp1 * h:
+        move = 1
+    elif y > hp2 * h:
+        move = 5
+    elif x > wp2 * w:
+        move = 3
     else:
         move = 0
     return move
@@ -45,7 +46,7 @@ def give_move(x, y, h, w, hp1, hp2, wp1, wp2):
 
 model = YOLO("yolov8n.pt")
 
-cap = cv2.VideoCapture('assets/insane 4k.mp4')
+cap = cv2.VideoCapture(0) # 'assets/insane 4k.mp4'
 
 moment = 1
 target_id = None
