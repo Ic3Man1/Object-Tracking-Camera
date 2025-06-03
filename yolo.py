@@ -2,6 +2,7 @@ import cv2
 import torch
 from ultralytics import YOLO
 import tkinter as tk
+import time
 
 def process_image(results, target_id):
     boxes = []
@@ -15,38 +16,43 @@ def process_image(results, target_id):
 
                 if confidence > 0.5:
                     boxes.append((x1, y1, x2, y2, label, confidence))
-                    print(f"ID {target_id} coords ({(x2-x1)/2}, {(y2-y1)/2})")
-                    coordinates = ((x2-x1)/2, (y2-y1)/2)
+                    print(f"ID {target_id} coords ({(x2+x1)/2}, {(y2+y1)/2})")
+                    coordinates = ((x2+x1)/2, (y2+y1)/2)
 
     return boxes, coordinates
 
 def give_move(x, y, h, w, hp1, hp2, wp1, wp2):
-    move = 0
-    if y < hp1 * h and x > wp2 * w:
-        move = 2
+    if y < hp1 * h and x < wp1 * w:
+        print("Lewy gorny")
+        return 8  # lewy górny róg
+    elif y < hp1 * h and x > wp2 * w:
+        print("Prawy gorny")
+        return 2  # prawy górny róg
     elif y > hp2 * h and x > wp2 * w:
-        move = 4
+        print("Prawy dolny")
+        return 4  # prawy dolny róg
     elif y > hp2 * h and x < wp1 * w:
-        move = 6
-    elif y < hp1 * h and x < wp1 * w:
-        move = 8
+        print("Lewy dolny")
+        return 6  # lewy dolny róg
     elif x < wp1 * w:
-        move = 7
+        print("Lewy")
+        return 7  # lewa krawędź
     elif y < hp1 * h:
-        move = 1
+        print("Gora")
+        return 1  # górna krawędź
     elif y > hp2 * h:
-        move = 5
+        print("Dol")
+        return 5  # dolna krawędź
     elif x > wp2 * w:
-        move = 3
+        print("Prawo")
+        return 3  # prawa krawędź
     else:
-        move = 0
-    return move
+        print("Srodek")
+        return 0  # środek
 
 
 
-model = YOLO("yolov8n.pt")
-
-cap = cv2.VideoCapture(0) # 'assets/insane 4k.mp4'
+model = YOLO("yolov8n.pt").to('cuda')
 
 moment = 1
 target_id = None
@@ -61,6 +67,13 @@ while(class_id < 0):
     else:
         print("WRONG OBJECT NAME!!!")
 
+rtsp_url = 'rtsp://admin:admin123@192.168.5.190:554/main'
+
+cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+#cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
+#time.sleep(2)
+
 while cap.isOpened():
     ret, frame = cap.read()
     height, width = frame.shape[:2]
@@ -68,7 +81,7 @@ while cap.isOpened():
     if not ret:
         break
 
-    if moment % 2 == 0 or moment == 1:
+    if moment % 10 == 0 or moment == 1:
         results = model.track(frame, classes=class_id, persist=True, verbose=False)
         if target_id is None:
             for result in results:
@@ -91,7 +104,7 @@ while cap.isOpened():
     if coordinates:
         x, y = coordinates[:2]
         camera_move = give_move(x, y, height, width, hp1, hp2, wp1, wp2)
-        if moment % 2 == 0 or moment == 1:
+        if moment % 5 == 0 or moment == 1:
             print(camera_move)
 
     cv2.line(frame, (int(width*wp1), 0), (int(width*wp1), height), color=(0, 255, 0), thickness=2)
