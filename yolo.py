@@ -52,7 +52,7 @@ def give_move(x, y, h, w, hp1, hp2, wp1, wp2):
 
 
 
-model = YOLO("yolov8n.pt").to('cuda')
+model = YOLO("yolov8n.pt").to('cpu')
 
 moment = 1
 target_id = None
@@ -67,12 +67,12 @@ while(class_id < 0):
     else:
         print("WRONG OBJECT NAME!!!")
 
-rtsp_url = 'rtsp://admin:admin123@192.168.5.190:554/main'
-
-cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
-#time.sleep(2)
+rtsp_url = 'rtsp://admin:admin123@192.168.5.190:554/main'  # nieużywane
+# cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
+# cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+# cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
+cap = cv2.VideoCapture(0)  # użycie kamery laptopa
+time.sleep(2)
 
 while cap.isOpened():
     ret, frame = cap.read()
