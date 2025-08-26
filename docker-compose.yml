@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  object-tracking-camera:
+    build: .
+    container_name: object-tracking-camera
+    restart: unless-stopped
+    
+    # Mount camera device (adjust device path as needed for your Pi)
+    devices:
+      - /dev/video0:/dev/video0
+    
+    # Environment variables
+    environment:
+      - DISPLAY=${DISPLAY}
+      - PYTHONUNBUFFERED=1
+    
+    # Volume mounts
+    volumes:
+      # For X11 forwarding (if using GUI)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Mount directory for saving results/logs
+      - ./output:/app/output
+      # Mount models directory (for persistent model storage)
+      - ./models:/app/models
+    
+    # Network mode for easier access
+    network_mode: host
+    
+    # Memory and CPU limits for Raspberry Pi 4
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '3.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    
+    # Privileged mode for camera access
+    privileged: true
