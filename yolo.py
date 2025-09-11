@@ -68,10 +68,9 @@ while(class_id < 0):
         print("WRONG OBJECT NAME!!!")
 
 rtsp_url = 'rtsp://admin:admin123@192.168.5.190:554/main'
-
 cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-#cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
+# cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+# cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
 #time.sleep(2)
 
 while cap.isOpened():
