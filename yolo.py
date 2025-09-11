@@ -3,6 +3,7 @@ import torch
 from ultralytics import YOLO
 import time
 import math
+import numpy as np
 
 def process_image(results, target_id, frame_width, frame_height):
     boxes = []
@@ -169,6 +170,31 @@ def setup_gps_tracking():
         else:
             print("Odpowiedz 'tak' lub 'nie'")
 
+def draw_arrow(img, start_point, end_point, color=(0, 0, 255), thickness=3, arrow_length=20):
+    """
+    Rysuje strzałkę od punktu startowego do końcowego
+    """
+    # Rysuj główną linię
+    cv2.line(img, start_point, end_point, color, thickness)
+    
+    # Oblicz kąt strzałki
+    angle = math.atan2(end_point[1] - start_point[1], end_point[0] - start_point[0])
+    
+    # Oblicz punkty dla grotu strzałki
+    arrow_angle = math.pi / 6  # 30 stopni
+    
+    # Pierwszy punkt grotu
+    x1 = int(end_point[0] - arrow_length * math.cos(angle - arrow_angle))
+    y1 = int(end_point[1] - arrow_length * math.sin(angle - arrow_angle))
+    
+    # Drugi punkt grotu
+    x2 = int(end_point[0] - arrow_length * math.cos(angle + arrow_angle))
+    y2 = int(end_point[1] - arrow_length * math.sin(angle + arrow_angle))
+    
+    # Rysuj grot strzałki
+    cv2.line(img, end_point, (x1, y1), color, thickness)
+    cv2.line(img, end_point, (x2, y2), color, thickness)
+
 
 # Konfiguracja GPS - uruchom przed główną logiką
 if not setup_gps_tracking():
@@ -221,6 +247,13 @@ while cap.isOpened():
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 5)
         cv2.putText(frame, f"{label} {confidence:.2f}", (x1+5, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
+    # Środek okna
+    frame_center_x = width // 2
+    frame_center_y = height // 2
+    
+    # Rysuj krzyżyk w środku ekranu
+    cv2.drawMarker(frame, (frame_center_x, frame_center_y), (0, 255, 255), cv2.MARKER_CROSS, 20, 3)
+
     hp1 = 0.25 # height parameter 1
     hp2 = 0.75 # height parameter 2
     wp1 = 0.2 # width parameter 1
@@ -229,6 +262,22 @@ while cap.isOpened():
     if coordinates:
         x, y = coordinates[:2]
         camera_move = give_move(x, y, height, width, hp1, hp2, wp1, wp2)
+        
+        # Rysuj strzałkę od środka ekranu do środka obiektu
+        object_center = (int(x), int(y))
+        screen_center = (frame_center_x, frame_center_y)
+        
+        # Rysuj punkt w środku obiektu
+        cv2.circle(frame, object_center, 8, (255, 0, 255), -1)
+        
+        # Rysuj strzałkę tylko jeśli obiekt nie jest w centrum
+        distance = math.sqrt((x - frame_center_x)**2 + (y - frame_center_y)**2)
+        if distance > 20:  # Minimalna odległość, żeby rysować strzałkę
+            draw_arrow(frame, screen_center, object_center, color=(0, 0, 255), thickness=4)
+            
+        # Wyświetl informacje o odległości
+        cv2.putText(frame, f"Odleglosc: {distance:.1f}px", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     cv2.line(frame, (int(width*wp1), 0), (int(width*wp1), height), color=(0, 255, 0), thickness=2)
     cv2.line(frame, (int(width*wp2), 0), (int(width*wp2), height), color=(0, 255, 0), thickness=2)
