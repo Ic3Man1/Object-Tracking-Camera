@@ -1,9 +1,78 @@
+#!/usr/bin/env python3
 import cv2
 import torch
 from ultralytics import YOLO
 import time
 import math
 import numpy as np
+
+# >>> NET: prosty broadcaster TCP (serwer na laptopie)
+import socket, threading, json, time as _time
+class ErrorBroadcaster:
+    def __init__(self, host="0.0.0.0", port=5005):
+        self.host = host
+        self.port = port
+        self.clients = set()
+        self.lock = threading.Lock()
+        self._srv_thread = threading.Thread(target=self._serve, daemon=True)
+        self._srv_thread.start()
+        print(f"[NET] Serwer uruchomiony na {host}:{port}")
+
+    def _serve(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind((self.host, self.port))
+            srv.listen(10)
+            while True:
+                conn, addr = srv.accept()
+                print(f"[NET] Klient połączony: {addr}")
+                with self.lock:
+                    self.clients.add(conn)
+                threading.Thread(target=self._client_loop, args=(conn, addr), daemon=True).start()
+
+    def _client_loop(self, conn, addr):
+        try:
+            # powitanie (opcjonalne)
+            self._send_line(conn, json.dumps({"status": "connected"}))
+            # nie czytamy danych — utrzymujemy połączenie do rozłączenia
+            while True:
+                data = conn.recv(1)
+                if not data:
+                    break
+        except Exception:
+            pass
+        finally:
+            with self.lock:
+                if conn in self.clients:
+                    self.clients.remove(conn)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print(f"[NET] Klient rozłączony: {addr}")
+
+    def _send_line(self, conn, line: str):
+        conn.sendall((line + "\n").encode("utf-8"))
+
+    def publish(self, error_x: float):
+        msg = json.dumps({"error_x": float(error_x), "ts": _time.time()})
+        print(f"[NET] Publikuję: {msg}")
+        dead = []
+        with self.lock:
+            for c in list(self.clients):
+                try:
+                    self._send_line(c, msg)
+                except Exception:
+                    dead.append(c)
+            for d in dead:
+                try:
+                    d.close()
+                except Exception:
+                    pass
+                self.clients.discard(d)
+
+# >>> NET: start serwera na porcie 5005
+broadcaster = ErrorBroadcaster(host="0.0.0.0", port=5005)
 
 def process_image(results, target_id, frame_width, frame_height):
     boxes = []
@@ -31,7 +100,7 @@ def process_image(results, target_id, frame_width, frame_height):
                     distance_y = object_center_y - frame_center_y
                     
                     print(f"ID {target_id} - Odległość X: {distance_x:.1f}px, Odległość Y: {distance_y:.1f}px")
-                    coordinates = (object_center_x, object_center_y)
+                    coordinates = (object_center_x, object_center_y, distance_x, distance_y)
 
     return boxes, coordinates
 
@@ -103,62 +172,38 @@ def get_camera_orientation():
 def calculate_bearing(lat1, lon1, lat2, lon2):
     """Oblicza kąt między dwoma punktami GPS (bearing)"""
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    
     dlon = lon2 - lon1
-    
     x = math.sin(dlon) * math.cos(lat2)
     y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
-    
     bearing = math.atan2(x, y)
     bearing = math.degrees(bearing)
     bearing = (bearing + 360) % 360  # Normalizacja do 0-360
-    
     return bearing
 
 def setup_gps_tracking():
     """Konfiguruje śledzenie GPS i oblicza wymagany kąt obrotu kamery"""
     print("=== KONFIGURACJA GPS KAMERY ===")
-    
-    # Pobierz współrzędne kamery
-    camera_lat, camera_lon = get_gps_coordinates(
-        "Wprowadź współrzędne GPS kamery (szerokość,długość): "
-    )
+    camera_lat, camera_lon = get_gps_coordinates("Wprowadź współrzędne GPS kamery (szerokość,długość): ")
     print(f"Pozycja kamery: {camera_lat}, {camera_lon}")
-    
-    # Pobierz orientację kamery
     camera_orientation = get_camera_orientation()
-    
-    # Pobierz współrzędne obiektu do śledzenia
-    target_lat, target_lon = get_gps_coordinates(
-        "Wprowadź współrzędne GPS obiektu do śledzenia (szerokość,długość): "
-    )
+    target_lat, target_lon = get_gps_coordinates("Wprowadź współrzędne GPS obiektu do śledzenia (szerokość,długość): ")
     print(f"Pozycja obiektu: {target_lat}, {target_lon}")
-    
-    # Oblicz kąt do obiektu
     target_bearing = calculate_bearing(camera_lat, camera_lon, target_lat, target_lon)
-    
-    # Oblicz wymagany kąt obrotu
     rotation_angle = target_bearing - camera_orientation
-    
-    # Normalizacja kąta do zakresu -180 do 180
     if rotation_angle > 180:
         rotation_angle -= 360
     elif rotation_angle < -180:
         rotation_angle += 360
-    
     print(f"\n=== WYNIKI OBLICZEŃ ===")
     print(f"Kierunek do obiektu: {target_bearing:.1f}°")
     print(f"Aktualna orientacja kamery: {camera_orientation}°")
     print(f"Wymagany obrót kamery: {rotation_angle:.1f}°")
-    
     if rotation_angle > 0:
         print(f"Obróć kamerę w PRAWO o {rotation_angle:.1f}°")
     elif rotation_angle < 0:
         print(f"Obróć kamerę w LEWO o {abs(rotation_angle):.1f}°")
     else:
         print("Kamera jest już skierowana na obiekt!")
-    
-    # Potwierdzenie ustawienia kamery
     while True:
         confirmation = input("\nCzy kamera została już ustawiona zgodnie z wyliczeniami? (tak/nie): ").lower()
         if confirmation in ['tak', 't', 'yes', 'y']:
@@ -171,30 +216,15 @@ def setup_gps_tracking():
             print("Odpowiedz 'tak' lub 'nie'")
 
 def draw_arrow(img, start_point, end_point, color=(0, 0, 255), thickness=3, arrow_length=20):
-    """
-    Rysuje strzałkę od punktu startowego do końcowego
-    """
-    # Rysuj główną linię
     cv2.line(img, start_point, end_point, color, thickness)
-    
-    # Oblicz kąt strzałki
     angle = math.atan2(end_point[1] - start_point[1], end_point[0] - start_point[0])
-    
-    # Oblicz punkty dla grotu strzałki
     arrow_angle = math.pi / 6  # 30 stopni
-    
-    # Pierwszy punkt grotu
     x1 = int(end_point[0] - arrow_length * math.cos(angle - arrow_angle))
     y1 = int(end_point[1] - arrow_length * math.sin(angle - arrow_angle))
-    
-    # Drugi punkt grotu
     x2 = int(end_point[0] - arrow_length * math.cos(angle + arrow_angle))
     y2 = int(end_point[1] - arrow_length * math.sin(angle + arrow_angle))
-    
-    # Rysuj grot strzałki
     cv2.line(img, end_point, (x1, y1), color, thickness)
     cv2.line(img, end_point, (x2, y2), color, thickness)
-
 
 # Konfiguracja GPS - uruchom przed główną logiką
 if not setup_gps_tracking():
@@ -216,79 +246,59 @@ while(class_id < 0):
         print("WRONG OBJECT NAME!!!")
 
 rtsp_url = 'rtsp://admin:admin123@192.168.5.190:554/main'  # nieużywane
-# cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
-# cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-# cap = cv2.VideoCapture(gst, cv2.CAP_FFMPEG)
-
-# AKTYWNE: Użycie kamery laptopa
-cap = cv2.VideoCapture(0)  # 0 = domyślna kamera
+cap = cv2.VideoCapture(rtsp_url) # 'assets/insane 4k.mp4'
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 time.sleep(2)
 
+boxes = []  # >>> ważne: zainicjalizuj boxes, by rysowanie nie sypało się przed pierwszym 'results'
+
 while cap.isOpened():
     ret, frame = cap.read()
-    height, width = frame.shape[:2]
-
     if not ret:
         break
+    height, width = frame.shape[:2]
 
     if moment % 10 == 0 or moment == 1:
         results = model.track(frame, classes=class_id, persist=True, verbose=False)
-        if target_id is None:
+        # if target_id is None:
+        if results is not None:
             for result in results:
                 if result.boxes:
                     first_id_box = next((b for b in result.boxes if b.id is not None), None)
-                    if first_id_box:
-                        target_id = int(first_id_box.id)
-                        break
-        boxes, coordinates = process_image(results, target_id, width, height)
+                    # if first_id_box:
+                    #     target_id = int(first_id_box.id)
+                    #     break
+                    if first_id_box is not None:
+                        boxes, coordinates = process_image(results, int(first_id_box.id), width, height)
 
-    for x1, y1, x2, y2, label, confidence in boxes:
+    if boxes:
+        x1, y1, x2, y2, label, confidence = boxes[0]
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 5)
         cv2.putText(frame, f"{label} {confidence:.2f}", (x1+5, y1+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-    # Środek okna
-    frame_center_x = width // 2
-    frame_center_y = height // 2
-    
-    # Rysuj krzyżyk w środku ekranu
-    cv2.drawMarker(frame, (frame_center_x, frame_center_y), (0, 255, 255), cv2.MARKER_CROSS, 20, 3)
-
-    hp1 = 0.25 # height parameter 1
-    hp2 = 0.75 # height parameter 2
-    wp1 = 0.2 # width parameter 1
-    wp2 = 0.8 # width parameter 2
-
-    if coordinates:
-        x, y = coordinates[:2]
-        camera_move = give_move(x, y, height, width, hp1, hp2, wp1, wp2)
+        # Środek okna
+        frame_center_x = width // 2
+        frame_center_y = height // 2
         
-        # Rysuj strzałkę od środka ekranu do środka obiektu
-        object_center = (int(x), int(y))
-        screen_center = (frame_center_x, frame_center_y)
-        
-        # Rysuj punkt w środku obiektu
-        cv2.circle(frame, object_center, 8, (255, 0, 255), -1)
-        
-        # Rysuj strzałkę tylko jeśli obiekt nie jest w centrum
-        distance = math.sqrt((x - frame_center_x)**2 + (y - frame_center_y)**2)
-        if distance > 20:  # Minimalna odległość, żeby rysować strzałkę
-            draw_arrow(frame, screen_center, object_center, color=(0, 0, 255), thickness=4)
-            
-        # Wyświetl informacje o odległości
-        cv2.putText(frame, f"Odleglosc: {distance:.1f}px", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # Krzyżyk w środku
+        cv2.drawMarker(frame, (frame_center_x, frame_center_y), (0, 255, 255), cv2.MARKER_CROSS, 20, 3)
 
-    cv2.line(frame, (int(width*wp1), 0), (int(width*wp1), height), color=(0, 255, 0), thickness=2)
-    cv2.line(frame, (int(width*wp2), 0), (int(width*wp2), height), color=(0, 255, 0), thickness=2)
-    cv2.line(frame, (0, int(height*hp1)), (width, int(height*hp1)), color=(0, 255, 0), thickness=2)
-    cv2.line(frame, (0, int(height*hp2)), (width, int(height*hp2)), color=(0, 255, 0), thickness=2)
+        hp1, hp2 = 0.25, 0.75
+        wp1, wp2 = 0.2, 0.8
+
+        if coordinates and moment % 10 == 0:
+            _, _, distance_x, _ = coordinates
+            broadcaster.publish(distance_x)
+
+        # Linie pomocnicze
+        cv2.line(frame, (int(width*wp1), 0), (int(width*wp1), height), color=(0, 255, 0), thickness=2)
+        cv2.line(frame, (int(width*wp2), 0), (int(width*wp2), height), color=(0, 255, 0), thickness=2)
+        cv2.line(frame, (0, int(height*hp1)), (width, int(height*hp1)), color=(0, 255, 0), thickness=2)
+        cv2.line(frame, (0, int(height*hp2)), (width, int(height*hp2)), color=(0, 255, 0), thickness=2)
 
     cv2.imshow("Frame", frame)
-
     moment += 1
-
-    if cv2.waitKey(int(1)) == ord('q'):
+    if cv2.waitKey(1) == ord('q'):
         break
 
 cap.release()
